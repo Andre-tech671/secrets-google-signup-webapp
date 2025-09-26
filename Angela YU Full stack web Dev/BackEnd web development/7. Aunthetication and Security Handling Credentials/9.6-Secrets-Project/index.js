@@ -15,7 +15,7 @@ const app = express();
 const port = process.env.PORT || 3000;
 const saltRounds = 10;
 
-// Setup static and views
+// Static files and views
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 app.set("view engine", "ejs");
@@ -27,19 +27,18 @@ app.use(
   session({
     secret: process.env.SESSION_SECRET,
     resave: false,
-    saveUninitialized: true,
+    saveUninitialized: false,
   })
 );
 app.use(passport.initialize());
 app.use(passport.session());
 
-// PostgreSQL setup
+// PostgreSQL setup using DATABASE_URL
 const db = new pg.Client({
-  user: process.env.PG_USER,
-  host: process.env.PG_HOST,
-  database: process.env.PG_DATABASE,
-  password: process.env.PG_PASSWORD,
-  port: process.env.PG_PORT,
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false,
+  },
 });
 db.connect();
 
@@ -120,10 +119,10 @@ passport.use(
       try {
         const result = await db.query("SELECT * FROM users WHERE email = $1", [profile.email]);
         if (result.rows.length === 0) {
-          const newUser = await db.query("INSERT INTO users (email, password) VALUES ($1, $2) RETURNING *", [
-            profile.email,
-            "google",
-          ]);
+          const newUser = await db.query(
+            "INSERT INTO users (email, password) VALUES ($1, $2) RETURNING *",
+            [profile.email, "google"]
+          );
           return done(null, newUser.rows[0]);
         } else {
           return done(null, result.rows[0]);
@@ -137,9 +136,15 @@ passport.use(
 
 // Auth Routes
 app.get("/auth/google", passport.authenticate("google", { scope: ["profile", "email"] }));
-app.get("/auth/google/secrets", passport.authenticate("google", { successRedirect: "/secrets", failureRedirect: "/login" }));
+app.get("/auth/google/secrets", passport.authenticate("google", {
+  successRedirect: "/secrets",
+  failureRedirect: "/login",
+}));
 
-app.post("/login", passport.authenticate("local", { successRedirect: "/secrets", failureRedirect: "/login" }));
+app.post("/login", passport.authenticate("local", {
+  successRedirect: "/secrets",
+  failureRedirect: "/login",
+}));
 
 app.post("/register", async (req, res) => {
   const { username: email, password } = req.body;
@@ -149,7 +154,10 @@ app.post("/register", async (req, res) => {
 
     bcrypt.hash(password, saltRounds, async (err, hash) => {
       if (err) return console.error(err);
-      const newUser = await db.query("INSERT INTO users (email, password) VALUES ($1, $2) RETURNING *", [email, hash]);
+      const newUser = await db.query(
+        "INSERT INTO users (email, password) VALUES ($1, $2) RETURNING *",
+        [email, hash]
+      );
       req.login(newUser.rows[0], err => {
         if (err) return console.error(err);
         res.redirect("/secrets");
